@@ -30,6 +30,7 @@ import {
   FormEvent,
   PointerEvent,
   ReactNode,
+  TouchEvent,
   useEffect,
   useMemo,
   useRef,
@@ -189,7 +190,7 @@ export const App = () => {
           />
         )}
       </main>
-      <BottomNav screen={screen} t={t} go={setScreen} />
+      {screen.name !== 'study' && <BottomNav screen={screen} t={t} go={setScreen} />}
     </div>
   );
 };
@@ -664,7 +665,7 @@ const StudyView = ({
   const [flipped, setFlipped] = useState(false);
   const [doneCount, setDoneCount] = useState(0);
   const [last, setLast] = useState<Card | undefined>();
-  const [startX, setStartX] = useState<number | undefined>();
+  const [startPoint, setStartPoint] = useState<{ x: number; y: number } | undefined>();
   const current = queue[0];
   const imageUrl = useMediaUrl(current?.questionImageId);
   const audioUrl = useMediaUrl(current?.answerAudioId);
@@ -695,12 +696,24 @@ const StudyView = ({
     refresh();
   };
 
+  const finishSwipe = (x: number, y: number) => {
+    if (!startPoint) return;
+    const deltaX = x - startPoint.x;
+    const deltaY = y - startPoint.y;
+    setStartPoint(undefined);
+    if (Math.abs(deltaX) < 55 || Math.abs(deltaX) < Math.abs(deltaY) * 1.25 || !flipped) return;
+    navigator.vibrate?.(12);
+    void answer(deltaX > 0);
+  };
+
   const handlePointerUp = (event: PointerEvent) => {
-    if (startX === undefined) return;
-    const delta = event.clientX - startX;
-    setStartX(undefined);
-    if (Math.abs(delta) < 70 || !flipped) return;
-    void answer(delta > 0);
+    finishSwipe(event.clientX, event.clientY);
+  };
+
+  const handleTouchEnd = (event: TouchEvent) => {
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+    finishSwipe(touch.clientX, touch.clientY);
   };
 
   return (
@@ -725,8 +738,13 @@ const StudyView = ({
           <button
             className={flipped ? 'study-card flipped' : 'study-card'}
             onClick={() => setFlipped((value) => !value)}
-            onPointerDown={(event) => setStartX(event.clientX)}
+            onPointerDown={(event) => setStartPoint({ x: event.clientX, y: event.clientY })}
             onPointerUp={handlePointerUp}
+            onTouchStart={(event) => {
+              const touch = event.touches[0];
+              if (touch) setStartPoint({ x: touch.clientX, y: touch.clientY });
+            }}
+            onTouchEnd={handleTouchEnd}
           >
             {!flipped ? (
               <span className="study-front">
