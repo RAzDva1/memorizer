@@ -14,11 +14,13 @@ export type SyncResult = {
   media: number;
 };
 
-const apiUrl = (settings: SyncSettings) =>
-  `https://api.github.com/repos/${encodeURIComponent(settings.owner)}/${encodeURIComponent(settings.repo)}/contents/${settings.path
+const apiUrlForPath = (settings: SyncSettings, path: string) =>
+  `https://api.github.com/repos/${encodeURIComponent(settings.owner)}/${encodeURIComponent(settings.repo)}/contents/${path
     .split('/')
     .map(encodeURIComponent)
     .join('/')}`;
+
+const apiUrl = (settings: SyncSettings) => apiUrlForPath(settings, settings.path);
 
 const githubHeaders = (settings: SyncSettings, accept = 'application/vnd.github+json') => ({
   Accept: accept,
@@ -55,6 +57,24 @@ const getRemoteMetadata = async (settings: SyncSettings): Promise<GitHubFileMeta
   return response.json() as Promise<GitHubFileMetadata>;
 };
 
+const putGitHubFile = async (settings: SyncSettings, path: string, content: string, message: string, sha?: string) => {
+  const response = await fetch(apiUrlForPath(settings, path), {
+    method: 'PUT',
+    headers: {
+      ...githubHeaders(settings),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      message,
+      branch: settings.branch,
+      content: bytesToBase64(content),
+      sha,
+    }),
+  });
+
+  if (!response.ok) throw new Error(`GitHub upload failed: ${response.status}`);
+};
+
 const getRemoteBundle = async (settings: SyncSettings): Promise<SyncBundle | undefined> => {
   const response = await fetch(`${apiUrl(settings)}?ref=${encodeURIComponent(settings.branch)}`, {
     headers: githubHeaders(settings, 'application/vnd.github.raw+json'),
@@ -87,22 +107,15 @@ export const createSyncBundle = async (): Promise<SyncBundle> => {
 
 export const pushSyncBundle = async (settings: SyncSettings): Promise<SyncResult> => {
   assertConfigured(settings);
-  const [bundle, metadata] = await Promise.all([createSyncBundle(), getRemoteMetadata(settings)]);
-  const response = await fetch(apiUrl(settings), {
-    method: 'PUT',
-    headers: {
-      ...githubHeaders(settings),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      message: `Update Memorizer sync ${new Date().toISOString()}`,
-      branch: settings.branch,
-      content: bytesToBase64(JSON.stringify(bundle)),
-      sha: metadata?.sha,
-    }),
-  });
+  const [bundle, metadata, remoteBundle] = await Promise.all([createSyncBundle(), getRemoteMetadata(settings), getRemoteBundle(settings)]);
+  const timestamp = new Date().toISOString();
 
-  if (!response.ok) throw new Error(`GitHub upload failed: ${response.status}`);
+  if (remoteBundle) {
+    const backupPath = `backups/${timestamp.replace(/[:.]/g, '-')}-${settings.path.split('/').pop() ?? 'memorizer-sync.json'}`;
+    await putGitHubFile(settings, backupPath, JSON.stringify(remoteBundle), `Backup Memorizer sync before ${timestamp}`);
+  }
+
+  await putGitHubFile(settings, settings.path, JSON.stringify(bundle), `Update Memorizer sync ${timestamp}`, metadata?.sha);
   return { decks: bundle.decks.length, cards: bundle.cards.length, media: bundle.media.length };
 };
 

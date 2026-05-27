@@ -904,7 +904,13 @@ const MoreView = ({
 
   const pushSync = async () => {
     try {
+      if (!confirm(t('pushSyncConfirm'))) return;
       await db.saveSyncSettings(syncSettings);
+      const cards = await db.getCards();
+      if (cards.length === 0) {
+        setMessage(t('emptyPushBlocked'));
+        return;
+      }
       setMessage(t('pushingSync'));
       const result = await pushSyncBundle(syncSettings);
       setMessage(`${t('syncDone')}: ${result.decks} ${t('decks')} · ${result.cards} ${t('cardsCount')}`);
@@ -915,6 +921,7 @@ const MoreView = ({
 
   const pullSync = async () => {
     try {
+      if (!confirm(t('pullSyncConfirm'))) return;
       await db.saveSyncSettings(syncSettings);
       setMessage(t('pullingSync'));
       const result = await pullSyncBundle(syncSettings);
