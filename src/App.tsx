@@ -61,6 +61,9 @@ const byCreatedAt = <T extends { createdAt: string }>(a: T, b: T) => a.createdAt
 
 const formatTags = (tags: string[]) => tags.join(', ');
 
+type SwipeInput = 'pointer' | 'touch';
+type SwipeMode = 'idle' | 'pending' | 'swipe' | 'scroll';
+
 const parseTags = (value: string) =>
   value
     .split(',')
@@ -669,6 +672,9 @@ const StudyView = ({
   const flippedRef = useRef(false);
   const currentRef = useRef<Card | undefined>();
   const didDragRef = useRef(false);
+  const swipeModeRef = useRef<SwipeMode>('idle');
+  const swipeInputRef = useRef<SwipeInput | undefined>();
+  const lastSwipePointRef = useRef<{ x: number; y: number } | undefined>();
   const current = queue[0];
   const imageUrl = useMediaUrl(current?.questionImageId);
   const audioUrl = useMediaUrl(current?.answerAudioId);
@@ -718,25 +724,35 @@ const StudyView = ({
 
   const cancelSwipe = () => {
     startPointRef.current = undefined;
+    swipeModeRef.current = 'idle';
+    swipeInputRef.current = undefined;
+    lastSwipePointRef.current = undefined;
     setDrag({ x: 0, y: 0 });
     setSwipeFeedback(undefined);
   };
 
-  const beginSwipe = (x: number, y: number) => {
+  const beginSwipe = (input: SwipeInput, x: number, y: number) => {
     startPointRef.current = { x, y };
+    swipeInputRef.current = input;
+    swipeModeRef.current = 'pending';
+    lastSwipePointRef.current = { x, y };
     didDragRef.current = false;
     setDrag({ x: 0, y: 0 });
     setSwipeFeedback(undefined);
   };
 
-  const finishSwipe = (x: number, y: number) => {
+  const finishSwipe = (input: SwipeInput, x: number, y: number) => {
     const origin = startPointRef.current;
+    if (swipeInputRef.current && swipeInputRef.current !== input) return;
     if (!origin) return;
     const deltaX = x - origin.x;
-    const deltaY = y - origin.y;
+    const wasSwipe = swipeModeRef.current === 'swipe' || (swipeModeRef.current === 'pending' && Math.abs(deltaX) > 48);
     startPointRef.current = undefined;
+    swipeModeRef.current = 'idle';
+    swipeInputRef.current = undefined;
+    lastSwipePointRef.current = undefined;
     setDrag({ x: 0, y: 0 });
-    if (Math.abs(deltaX) < 55 || Math.abs(deltaX) < Math.abs(deltaY) * 1.15 || !flippedRef.current) {
+    if (!wasSwipe || Math.abs(deltaX) < 48 || !flippedRef.current) {
       setSwipeFeedback(undefined);
       return;
     }
@@ -744,16 +760,40 @@ const StudyView = ({
     void answer(deltaX > 0, true);
   };
 
-  const moveSwipe = (x: number, y: number) => {
+  const moveSwipe = (input: SwipeInput, x: number, y: number, stopNativeScroll?: () => void) => {
     const origin = startPointRef.current;
+    if (swipeInputRef.current && swipeInputRef.current !== input) return;
     if (!origin || !flippedRef.current) return;
-    const nextX = Math.max(-140, Math.min(140, x - origin.x));
-    if (Math.abs(nextX) > 8 || Math.abs(y - origin.y) > 8) {
+    const deltaX = x - origin.x;
+    const deltaY = y - origin.y;
+    const absX = Math.abs(deltaX);
+    const absY = Math.abs(deltaY);
+
+    if (absX > 8 || absY > 8) {
       didDragRef.current = true;
     }
+
+    if (swipeModeRef.current === 'pending' && Math.max(absX, absY) > 10) {
+      if (absX > absY * 0.9) {
+        swipeModeRef.current = 'swipe';
+      } else if (absY > absX * 1.2) {
+        swipeModeRef.current = 'scroll';
+      }
+    }
+
+    if (swipeModeRef.current === 'scroll') {
+      setDrag({ x: 0, y: 0 });
+      setSwipeFeedback(undefined);
+      return;
+    }
+
+    if (swipeModeRef.current !== 'swipe') return;
+    stopNativeScroll?.();
+    lastSwipePointRef.current = { x, y };
+    const nextX = Math.max(-140, Math.min(140, deltaX));
     setDrag({
       x: nextX,
-      y: Math.max(-28, Math.min(28, y - origin.y)),
+      y: Math.max(-28, Math.min(28, deltaY)),
     });
     setSwipeFeedback(Math.abs(nextX) > 34 ? (nextX > 0 ? 'remember' : 'hard') : undefined);
   };
@@ -762,30 +802,40 @@ const StudyView = ({
     const handleTouchMove = (event: globalThis.TouchEvent) => {
       const touch = event.touches[0];
       if (!touch) return;
-      moveSwipe(touch.clientX, touch.clientY);
+      moveSwipe('touch', touch.clientX, touch.clientY, () => event.preventDefault());
     };
     const handleTouchEnd = (event: globalThis.TouchEvent) => {
       const touch = event.changedTouches[0];
       if (!touch) return;
-      finishSwipe(touch.clientX, touch.clientY);
+      finishSwipe('touch', touch.clientX, touch.clientY);
     };
-    const handlePointerMove = (event: globalThis.PointerEvent) => moveSwipe(event.clientX, event.clientY);
-    const handlePointerUp = (event: globalThis.PointerEvent) => finishSwipe(event.clientX, event.clientY);
+    const handlePointerMove = (event: globalThis.PointerEvent) =>
+      moveSwipe('pointer', event.clientX, event.clientY, () => event.preventDefault());
+    const handlePointerUp = (event: globalThis.PointerEvent) => finishSwipe('pointer', event.clientX, event.clientY);
+    const handlePointerCancel = (event: globalThis.PointerEvent) => finishSwipe('pointer', event.clientX, event.clientY);
+    const handleTouchCancel = () => {
+      const point = lastSwipePointRef.current;
+      if (point) {
+        finishSwipe('touch', point.x, point.y);
+        return;
+      }
+      cancelSwipe();
+    };
 
-    document.addEventListener('touchmove', handleTouchMove, { passive: true });
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
     document.addEventListener('touchend', handleTouchEnd, { passive: true });
-    document.addEventListener('touchcancel', cancelSwipe);
+    document.addEventListener('touchcancel', handleTouchCancel);
     document.addEventListener('pointermove', handlePointerMove);
     document.addEventListener('pointerup', handlePointerUp);
-    document.addEventListener('pointercancel', cancelSwipe);
+    document.addEventListener('pointercancel', handlePointerCancel);
 
     return () => {
       document.removeEventListener('touchmove', handleTouchMove);
       document.removeEventListener('touchend', handleTouchEnd);
-      document.removeEventListener('touchcancel', cancelSwipe);
+      document.removeEventListener('touchcancel', handleTouchCancel);
       document.removeEventListener('pointermove', handlePointerMove);
       document.removeEventListener('pointerup', handlePointerUp);
-      document.removeEventListener('pointercancel', cancelSwipe);
+      document.removeEventListener('pointercancel', handlePointerCancel);
     };
   });
 
@@ -823,11 +873,15 @@ const StudyView = ({
               }
               setFlipped((value) => !value);
             }}
-            onPointerDown={(event) => beginSwipe(event.clientX, event.clientY)}
+            onPointerDown={(event) => {
+              beginSwipe('pointer', event.clientX, event.clientY);
+              event.currentTarget.setPointerCapture?.(event.pointerId);
+            }}
             onPointerCancel={cancelSwipe}
             onTouchStart={(event) => {
+              if ('PointerEvent' in window) return;
               const touch = event.touches[0];
-              if (touch) beginSwipe(touch.clientX, touch.clientY);
+              if (touch) beginSwipe('touch', touch.clientX, touch.clientY);
             }}
           >
             {!flipped ? (
