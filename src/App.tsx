@@ -809,10 +809,18 @@ const StudyView = ({
       if (!touch) return;
       finishSwipe('touch', touch.clientX, touch.clientY);
     };
-    const handlePointerMove = (event: globalThis.PointerEvent) =>
+    const handlePointerMove = (event: globalThis.PointerEvent) => {
+      if (event.pointerType === 'touch') return;
       moveSwipe('pointer', event.clientX, event.clientY, () => event.preventDefault());
-    const handlePointerUp = (event: globalThis.PointerEvent) => finishSwipe('pointer', event.clientX, event.clientY);
-    const handlePointerCancel = (event: globalThis.PointerEvent) => finishSwipe('pointer', event.clientX, event.clientY);
+    };
+    const handlePointerUp = (event: globalThis.PointerEvent) => {
+      if (event.pointerType === 'touch') return;
+      finishSwipe('pointer', event.clientX, event.clientY);
+    };
+    const handlePointerCancel = (event: globalThis.PointerEvent) => {
+      if (event.pointerType === 'touch') return;
+      finishSwipe('pointer', event.clientX, event.clientY);
+    };
     const handleTouchCancel = () => {
       const point = lastSwipePointRef.current;
       if (point) {
@@ -874,12 +882,14 @@ const StudyView = ({
               setFlipped((value) => !value);
             }}
             onPointerDown={(event) => {
+              if (event.pointerType === 'touch') return;
               beginSwipe('pointer', event.clientX, event.clientY);
               event.currentTarget.setPointerCapture?.(event.pointerId);
             }}
-            onPointerCancel={cancelSwipe}
+            onPointerCancel={(event) => {
+              if (event.pointerType !== 'touch') cancelSwipe();
+            }}
             onTouchStart={(event) => {
-              if ('PointerEvent' in window) return;
               const touch = event.touches[0];
               if (touch) beginSwipe('touch', touch.clientX, touch.clientY);
             }}
