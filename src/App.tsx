@@ -667,18 +667,27 @@ const StudyView = ({
   const [last, setLast] = useState<Card | undefined>();
   const [startPoint, setStartPoint] = useState<{ x: number; y: number } | undefined>();
   const [drag, setDrag] = useState({ x: 0, y: 0 });
+  const [swipeFeedback, setSwipeFeedback] = useState<'remember' | 'hard' | undefined>();
   const current = queue[0];
   const imageUrl = useMediaUrl(current?.questionImageId);
   const audioUrl = useMediaUrl(current?.answerAudioId);
 
-  const answer = async (remembered: boolean) => {
+  const answer = async (remembered: boolean, animate = false) => {
     if (!current) return;
+
+    if (animate) {
+      setSwipeFeedback(remembered ? 'remember' : 'hard');
+      setDrag({ x: remembered ? 420 : -420, y: 10 });
+      await new Promise((resolve) => window.setTimeout(resolve, 190));
+    }
+
     setLast(current);
     await db.saveCard({ ...current, srs: reviewCard(current.srs, remembered), updatedAt: nowIso() });
     setQueue((items) => items.slice(1));
     setDoneCount((count) => count + 1);
     setFlipped(false);
     setDrag({ x: 0, y: 0 });
+    setSwipeFeedback(undefined);
     refresh();
   };
 
@@ -688,6 +697,7 @@ const StudyView = ({
     setFlipped(false);
     setLast(undefined);
     setDrag({ x: 0, y: 0 });
+    setSwipeFeedback(undefined);
   };
 
   const undo = async () => {
@@ -697,6 +707,7 @@ const StudyView = ({
     setDoneCount((count) => Math.max(0, count - 1));
     setLast(undefined);
     setDrag({ x: 0, y: 0 });
+    setSwipeFeedback(undefined);
     refresh();
   };
 
@@ -708,15 +719,17 @@ const StudyView = ({
     setDrag({ x: 0, y: 0 });
     if (Math.abs(deltaX) < 55 || Math.abs(deltaX) < Math.abs(deltaY) * 1.15 || !flipped) return;
     navigator.vibrate?.(12);
-    void answer(deltaX > 0);
+    void answer(deltaX > 0, true);
   };
 
   const moveSwipe = (x: number, y: number) => {
     if (!startPoint || !flipped) return;
+    const nextX = Math.max(-140, Math.min(140, x - startPoint.x));
     setDrag({
-      x: Math.max(-140, Math.min(140, x - startPoint.x)),
+      x: nextX,
       y: Math.max(-28, Math.min(28, y - startPoint.y)),
     });
+    setSwipeFeedback(Math.abs(nextX) > 34 ? (nextX > 0 ? 'remember' : 'hard') : undefined);
   };
 
   const handlePointerUp = (event: PointerEvent) => {
@@ -749,7 +762,10 @@ const StudyView = ({
       ) : (
         <>
           <button
-            className={flipped ? 'study-card flipped' : 'study-card'}
+            className={[
+              flipped ? 'study-card flipped' : 'study-card',
+              swipeFeedback ? `swipe-${swipeFeedback}` : '',
+            ].join(' ')}
             style={{
               transform: flipped ? `translate3d(${drag.x}px, ${drag.y}px, 0) rotate(${drag.x / 18}deg)` : undefined,
             }}
@@ -779,6 +795,12 @@ const StudyView = ({
               </span>
             ) : (
               <span className="study-back">
+                {swipeFeedback && (
+                  <span className="swipe-badge">
+                    {swipeFeedback === 'remember' ? <Check size={20} /> : <X size={20} />}
+                    {swipeFeedback === 'remember' ? t('remember') : t('hard')}
+                  </span>
+                )}
                 {imageUrl && <img className="mini-image" src={imageUrl} alt="" />}
                 <span className="rich-answer" dangerouslySetInnerHTML={{ __html: sanitizeRichText(current.answerText) }} />
                 {audioUrl && <audio controls src={audioUrl} onClick={(event) => event.stopPropagation()} />}
@@ -787,8 +809,8 @@ const StudyView = ({
           </button>
           <p className="counter">{doneCount + 1} / {doneCount + queue.length}</p>
           <div className="answer-row">
-            <button className="hard-button" onClick={() => answer(false)}><X />{t('hard')}</button>
-            <button className="remember-button" onClick={() => answer(true)}><Check />{t('remember')}</button>
+            <button className="hard-button" onClick={() => answer(false, true)}><X />{t('hard')}</button>
+            <button className="remember-button" onClick={() => answer(true, true)}><Check />{t('remember')}</button>
           </div>
         </>
       )}

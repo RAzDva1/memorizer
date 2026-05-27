@@ -627,11 +627,27 @@ audio {
   touch-action: none;
   user-select: none;
   will-change: transform;
-  transition: transform 160ms ease;
+  transition:
+    box-shadow 150ms ease,
+    transform 190ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .study-card:active {
   transition: none;
+}
+
+.study-card.swipe-remember {
+  box-shadow:
+    0 22px 44px rgba(38, 31, 25, 0.16),
+    0 0 0 4px rgba(66, 169, 108, 0.26),
+    0 0 42px rgba(66, 169, 108, 0.28);
+}
+
+.study-card.swipe-hard {
+  box-shadow:
+    0 22px 44px rgba(38, 31, 25, 0.16),
+    0 0 0 4px rgba(203, 63, 47, 0.24),
+    0 0 42px rgba(203, 63, 47, 0.24);
 }
 
 .study-front,
@@ -662,10 +678,50 @@ audio {
 }
 
 .study-back {
+  position: relative;
   padding: 30px 24px;
   background: #fff;
   color: #1f2530;
   gap: 22px;
+}
+
+.study-card.swipe-remember .study-back {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(66, 169, 108, 0.14), transparent 42%),
+    #fff;
+}
+
+.study-card.swipe-hard .study-back {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(203, 63, 47, 0.12), transparent 42%),
+    #fff;
+}
+
+.swipe-badge {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 14px;
+  border-radius: 999px;
+  box-shadow: 0 10px 24px rgba(31, 37, 48, 0.12);
+  font-size: 14px;
+  font-weight: 850;
+  gap: 7px;
+  opacity: 0.96;
+  transform: translateX(-50%);
+}
+
+.swipe-remember .swipe-badge {
+  background: #eaf7ef;
+  color: #2f7d4b;
+}
+
+.swipe-hard .swipe-badge {
+  background: #fff0ee;
+  color: #bf3d2c;
 }
 
 .study-back .rich-answer {
