@@ -15,6 +15,7 @@
 html,
 body,
 #root {
+  overflow-x: hidden;
   min-height: 100%;
   margin: 0;
 }
@@ -38,6 +39,7 @@ button {
 }
 
 .app-shell {
+  overflow-x: hidden;
   min-height: 100vh;
   max-width: 920px;
   margin: 0 auto;
@@ -598,6 +600,7 @@ audio {
 
 .study-screen {
   display: flex;
+  overflow: hidden;
   min-height: 100vh;
   flex-direction: column;
   padding-top: calc(18px + env(safe-area-inset-top));

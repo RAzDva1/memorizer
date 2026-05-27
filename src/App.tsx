@@ -28,9 +28,7 @@ import {
   ChangeEvent,
   ClipboardEvent as ReactClipboardEvent,
   FormEvent,
-  PointerEvent,
   ReactNode,
-  TouchEvent,
   useEffect,
   useMemo,
   useRef,
@@ -665,15 +663,22 @@ const StudyView = ({
   const [flipped, setFlipped] = useState(false);
   const [doneCount, setDoneCount] = useState(0);
   const [last, setLast] = useState<Card | undefined>();
-  const [startPoint, setStartPoint] = useState<{ x: number; y: number } | undefined>();
   const [drag, setDrag] = useState({ x: 0, y: 0 });
   const [swipeFeedback, setSwipeFeedback] = useState<'remember' | 'hard' | undefined>();
+  const startPointRef = useRef<{ x: number; y: number } | undefined>();
+  const flippedRef = useRef(false);
+  const currentRef = useRef<Card | undefined>();
+  const didDragRef = useRef(false);
   const current = queue[0];
   const imageUrl = useMediaUrl(current?.questionImageId);
   const audioUrl = useMediaUrl(current?.answerAudioId);
 
+  flippedRef.current = flipped;
+  currentRef.current = current;
+
   const answer = async (remembered: boolean, animate = false) => {
-    if (!current) return;
+    const targetCard = currentRef.current;
+    if (!targetCard) return;
 
     if (animate) {
       setSwipeFeedback(remembered ? 'remember' : 'hard');
@@ -681,8 +686,8 @@ const StudyView = ({
       await new Promise((resolve) => window.setTimeout(resolve, 190));
     }
 
-    setLast(current);
-    await db.saveCard({ ...current, srs: reviewCard(current.srs, remembered), updatedAt: nowIso() });
+    setLast(targetCard);
+    await db.saveCard({ ...targetCard, srs: reviewCard(targetCard.srs, remembered), updatedAt: nowIso() });
     setQueue((items) => items.slice(1));
     setDoneCount((count) => count + 1);
     setFlipped(false);
@@ -711,36 +716,78 @@ const StudyView = ({
     refresh();
   };
 
-  const finishSwipe = (x: number, y: number) => {
-    if (!startPoint) return;
-    const deltaX = x - startPoint.x;
-    const deltaY = y - startPoint.y;
-    setStartPoint(undefined);
+  const cancelSwipe = () => {
+    startPointRef.current = undefined;
     setDrag({ x: 0, y: 0 });
-    if (Math.abs(deltaX) < 55 || Math.abs(deltaX) < Math.abs(deltaY) * 1.15 || !flipped) return;
+    setSwipeFeedback(undefined);
+  };
+
+  const beginSwipe = (x: number, y: number) => {
+    startPointRef.current = { x, y };
+    didDragRef.current = false;
+    setDrag({ x: 0, y: 0 });
+    setSwipeFeedback(undefined);
+  };
+
+  const finishSwipe = (x: number, y: number) => {
+    const origin = startPointRef.current;
+    if (!origin) return;
+    const deltaX = x - origin.x;
+    const deltaY = y - origin.y;
+    startPointRef.current = undefined;
+    setDrag({ x: 0, y: 0 });
+    if (Math.abs(deltaX) < 55 || Math.abs(deltaX) < Math.abs(deltaY) * 1.15 || !flippedRef.current) {
+      setSwipeFeedback(undefined);
+      return;
+    }
     navigator.vibrate?.(12);
     void answer(deltaX > 0, true);
   };
 
   const moveSwipe = (x: number, y: number) => {
-    if (!startPoint || !flipped) return;
-    const nextX = Math.max(-140, Math.min(140, x - startPoint.x));
+    const origin = startPointRef.current;
+    if (!origin || !flippedRef.current) return;
+    const nextX = Math.max(-140, Math.min(140, x - origin.x));
+    if (Math.abs(nextX) > 8 || Math.abs(y - origin.y) > 8) {
+      didDragRef.current = true;
+    }
     setDrag({
       x: nextX,
-      y: Math.max(-28, Math.min(28, y - startPoint.y)),
+      y: Math.max(-28, Math.min(28, y - origin.y)),
     });
     setSwipeFeedback(Math.abs(nextX) > 34 ? (nextX > 0 ? 'remember' : 'hard') : undefined);
   };
 
-  const handlePointerUp = (event: PointerEvent) => {
-    finishSwipe(event.clientX, event.clientY);
-  };
+  useEffect(() => {
+    const handleTouchMove = (event: globalThis.TouchEvent) => {
+      const touch = event.touches[0];
+      if (!touch) return;
+      moveSwipe(touch.clientX, touch.clientY);
+    };
+    const handleTouchEnd = (event: globalThis.TouchEvent) => {
+      const touch = event.changedTouches[0];
+      if (!touch) return;
+      finishSwipe(touch.clientX, touch.clientY);
+    };
+    const handlePointerMove = (event: globalThis.PointerEvent) => moveSwipe(event.clientX, event.clientY);
+    const handlePointerUp = (event: globalThis.PointerEvent) => finishSwipe(event.clientX, event.clientY);
 
-  const handleTouchEnd = (event: TouchEvent) => {
-    const touch = event.changedTouches[0];
-    if (!touch) return;
-    finishSwipe(touch.clientX, touch.clientY);
-  };
+    document.addEventListener('touchmove', handleTouchMove, { passive: true });
+    document.addEventListener('touchend', handleTouchEnd, { passive: true });
+    document.addEventListener('touchcancel', cancelSwipe);
+    document.addEventListener('pointermove', handlePointerMove);
+    document.addEventListener('pointerup', handlePointerUp);
+    document.addEventListener('pointercancel', cancelSwipe);
+
+    return () => {
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('touchend', handleTouchEnd);
+      document.removeEventListener('touchcancel', cancelSwipe);
+      document.removeEventListener('pointermove', handlePointerMove);
+      document.removeEventListener('pointerup', handlePointerUp);
+      document.removeEventListener('pointercancel', cancelSwipe);
+    };
+  });
 
   return (
     <section className="screen study-screen">
@@ -769,24 +816,19 @@ const StudyView = ({
             style={{
               transform: flipped ? `translate3d(${drag.x}px, ${drag.y}px, 0) rotate(${drag.x / 18}deg)` : undefined,
             }}
-            onClick={() => setFlipped((value) => !value)}
-            onPointerDown={(event) => setStartPoint({ x: event.clientX, y: event.clientY })}
-            onPointerMove={(event) => moveSwipe(event.clientX, event.clientY)}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={() => {
-              setStartPoint(undefined);
-              setDrag({ x: 0, y: 0 });
+            onClick={() => {
+              if (didDragRef.current) {
+                didDragRef.current = false;
+                return;
+              }
+              setFlipped((value) => !value);
             }}
+            onPointerDown={(event) => beginSwipe(event.clientX, event.clientY)}
+            onPointerCancel={cancelSwipe}
             onTouchStart={(event) => {
               const touch = event.touches[0];
-              if (touch) setStartPoint({ x: touch.clientX, y: touch.clientY });
+              if (touch) beginSwipe(touch.clientX, touch.clientY);
             }}
-            onTouchMove={(event) => {
-              const touch = event.touches[0];
-              if (!touch) return;
-              moveSwipe(touch.clientX, touch.clientY);
-            }}
-            onTouchEnd={handleTouchEnd}
           >
             {!flipped ? (
               <span className="study-front">
