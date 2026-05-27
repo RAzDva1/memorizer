@@ -4,7 +4,20 @@ import { sanitizeRichText } from './richText';
 import { Card, Deck, MediaAsset, SyncBundle, SyncCard, SyncSettings } from './types';
 import { createInitialSrs } from './srs';
 
-type GitHubFileMetadata = {
+type GitHubRef = {
+  object: {
+    sha: string;
+  };
+};
+
+type GitHubCommit = {
+  sha: string;
+  tree: {
+    sha: string;
+  };
+};
+
+type GitHubCreatedObject = {
   sha: string;
 };
 
@@ -21,6 +34,9 @@ const apiUrlForPath = (settings: SyncSettings, path: string) =>
     .join('/')}`;
 
 const apiUrl = (settings: SyncSettings) => apiUrlForPath(settings, settings.path);
+
+const gitApiUrl = (settings: SyncSettings, path: string) =>
+  `https://api.github.com/repos/${encodeURIComponent(settings.owner)}/${encodeURIComponent(settings.repo)}/git/${path}`;
 
 const githubHeaders = (settings: SyncSettings, accept = 'application/vnd.github+json') => ({
   Accept: accept,
@@ -47,32 +63,112 @@ const bytesToBase64 = (text: string) => {
   return btoa(binary);
 };
 
-const getRemoteMetadata = async (settings: SyncSettings): Promise<GitHubFileMetadata | undefined> => {
-  const response = await fetch(`${apiUrl(settings)}?ref=${encodeURIComponent(settings.branch)}`, {
+const readGitHubError = async (response: Response, label: string) => {
+  let detail = '';
+
+  try {
+    const body = await response.json();
+    const errors = Array.isArray(body.errors)
+      ? body.errors
+          .map((error: { message?: string; code?: string; field?: string }) => error.message ?? error.code ?? error.field)
+          .filter(Boolean)
+          .join('; ')
+      : '';
+    detail = [body.message, errors].filter(Boolean).join(': ');
+  } catch {
+    detail = await response.text().catch(() => '');
+  }
+
+  throw new Error(`${label}: ${response.status}${detail ? ` (${detail})` : ''}`);
+};
+
+const getBranchHead = async (settings: SyncSettings): Promise<GitHubCommit> => {
+  const refResponse = await fetch(gitApiUrl(settings, `ref/heads/${encodeURIComponent(settings.branch)}`), {
     headers: githubHeaders(settings),
   });
 
-  if (response.status === 404) return undefined;
-  if (!response.ok) throw new Error(`GitHub metadata request failed: ${response.status}`);
-  return response.json() as Promise<GitHubFileMetadata>;
+  if (!refResponse.ok) await readGitHubError(refResponse, 'GitHub branch request failed');
+  const ref = (await refResponse.json()) as GitHubRef;
+
+  const commitResponse = await fetch(gitApiUrl(settings, `commits/${ref.object.sha}`), {
+    headers: githubHeaders(settings),
+  });
+
+  if (!commitResponse.ok) await readGitHubError(commitResponse, 'GitHub commit request failed');
+  return commitResponse.json() as Promise<GitHubCommit>;
 };
 
-const putGitHubFile = async (settings: SyncSettings, path: string, content: string, message: string, sha?: string) => {
-  const response = await fetch(apiUrlForPath(settings, path), {
-    method: 'PUT',
+const createGitBlob = async (settings: SyncSettings, content: string): Promise<string> => {
+  const response = await fetch(gitApiUrl(settings, 'blobs'), {
+    method: 'POST',
+    headers: {
+      ...githubHeaders(settings),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      content: bytesToBase64(content),
+      encoding: 'base64',
+    }),
+  });
+
+  if (!response.ok) await readGitHubError(response, 'GitHub blob upload failed');
+  return ((await response.json()) as GitHubCreatedObject).sha;
+};
+
+const commitGitFiles = async (
+  settings: SyncSettings,
+  files: Array<{ path: string; content: string }>,
+  message: string,
+) => {
+  const head = await getBranchHead(settings);
+  const blobs = await Promise.all(files.map(async (file) => ({ ...file, sha: await createGitBlob(settings, file.content) })));
+  const treeResponse = await fetch(gitApiUrl(settings, 'trees'), {
+    method: 'POST',
+    headers: {
+      ...githubHeaders(settings),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      base_tree: head.tree.sha,
+      tree: blobs.map((blob) => ({
+        path: blob.path.replace(/^\/+/, ''),
+        mode: '100644',
+        type: 'blob',
+        sha: blob.sha,
+      })),
+    }),
+  });
+
+  if (!treeResponse.ok) await readGitHubError(treeResponse, 'GitHub tree update failed');
+  const tree = (await treeResponse.json()) as GitHubCreatedObject;
+  const commitResponse = await fetch(gitApiUrl(settings, 'commits'), {
+    method: 'POST',
     headers: {
       ...githubHeaders(settings),
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       message,
-      branch: settings.branch,
-      content: bytesToBase64(content),
-      sha,
+      tree: tree.sha,
+      parents: [head.sha],
     }),
   });
 
-  if (!response.ok) throw new Error(`GitHub upload failed: ${response.status}`);
+  if (!commitResponse.ok) await readGitHubError(commitResponse, 'GitHub commit failed');
+  const commit = (await commitResponse.json()) as GitHubCreatedObject;
+  const refResponse = await fetch(gitApiUrl(settings, `refs/heads/${encodeURIComponent(settings.branch)}`), {
+    method: 'PATCH',
+    headers: {
+      ...githubHeaders(settings),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      sha: commit.sha,
+      force: false,
+    }),
+  });
+
+  if (!refResponse.ok) await readGitHubError(refResponse, 'GitHub branch update failed');
 };
 
 const getRemoteBundle = async (settings: SyncSettings): Promise<SyncBundle | undefined> => {
@@ -107,15 +203,16 @@ export const createSyncBundle = async (): Promise<SyncBundle> => {
 
 export const pushSyncBundle = async (settings: SyncSettings): Promise<SyncResult> => {
   assertConfigured(settings);
-  const [bundle, metadata, remoteBundle] = await Promise.all([createSyncBundle(), getRemoteMetadata(settings), getRemoteBundle(settings)]);
+  const [bundle, remoteBundle] = await Promise.all([createSyncBundle(), getRemoteBundle(settings)]);
   const timestamp = new Date().toISOString();
+  const files = [{ path: settings.path, content: JSON.stringify(bundle) }];
 
   if (remoteBundle) {
     const backupPath = `backups/${timestamp.replace(/[:.]/g, '-')}-${settings.path.split('/').pop() ?? 'memorizer-sync.json'}`;
-    await putGitHubFile(settings, backupPath, JSON.stringify(remoteBundle), `Backup Memorizer sync before ${timestamp}`);
+    files.push({ path: backupPath, content: JSON.stringify(remoteBundle) });
   }
 
-  await putGitHubFile(settings, settings.path, JSON.stringify(bundle), `Update Memorizer sync ${timestamp}`, metadata?.sha);
+  await commitGitFiles(settings, files, `Update Memorizer sync ${timestamp}`);
   return { decks: bundle.decks.length, cards: bundle.cards.length, media: bundle.media.length };
 };
 
