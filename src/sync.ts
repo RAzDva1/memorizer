@@ -21,11 +21,19 @@ type GitHubCreatedObject = {
   sha: string;
 };
 
+type GitHubContentItem = {
+  name: string;
+  path: string;
+  type: string;
+};
+
 export type SyncResult = {
   decks: number;
   cards: number;
   media: number;
 };
+
+const MAX_SYNC_BACKUPS = 2;
 
 const apiUrlForPath = (settings: SyncSettings, path: string) =>
   `https://api.github.com/repos/${encodeURIComponent(settings.owner)}/${encodeURIComponent(settings.repo)}/contents/${path
@@ -118,10 +126,25 @@ const createGitBlob = async (settings: SyncSettings, content: string): Promise<s
 const commitGitFiles = async (
   settings: SyncSettings,
   files: Array<{ path: string; content: string }>,
+  deletePaths: string[],
   message: string,
 ) => {
   const head = await getBranchHead(settings);
   const blobs = await Promise.all(files.map(async (file) => ({ ...file, sha: await createGitBlob(settings, file.content) })));
+  const treeItems = [
+    ...blobs.map((blob) => ({
+      path: blob.path.replace(/^\/+/, ''),
+      mode: '100644',
+      type: 'blob',
+      sha: blob.sha,
+    })),
+    ...deletePaths.map((path) => ({
+      path: path.replace(/^\/+/, ''),
+      mode: '100644',
+      type: 'blob',
+      sha: null,
+    })),
+  ];
   const treeResponse = await fetch(gitApiUrl(settings, 'trees'), {
     method: 'POST',
     headers: {
@@ -130,12 +153,7 @@ const commitGitFiles = async (
     },
     body: JSON.stringify({
       base_tree: head.tree.sha,
-      tree: blobs.map((blob) => ({
-        path: blob.path.replace(/^\/+/, ''),
-        mode: '100644',
-        type: 'blob',
-        sha: blob.sha,
-      })),
+      tree: treeItems,
     }),
   });
 
@@ -181,6 +199,33 @@ const getRemoteBundle = async (settings: SyncSettings): Promise<SyncBundle | und
   return response.json() as Promise<SyncBundle>;
 };
 
+const getRemoteBackups = async (settings: SyncSettings): Promise<GitHubContentItem[]> => {
+  const response = await fetch(`${apiUrlForPath(settings, 'backups')}?ref=${encodeURIComponent(settings.branch)}`, {
+    headers: githubHeaders(settings),
+  });
+
+  if (response.status === 404) return [];
+  if (!response.ok) await readGitHubError(response, 'GitHub backups request failed');
+  const result = await response.json();
+
+  return Array.isArray(result) ? result.filter((item): item is GitHubContentItem => item.type === 'file') : [];
+};
+
+const backupCleanupPaths = (existingBackups: GitHubContentItem[], newBackupPath?: string) => {
+  const nextBackups = [
+    ...existingBackups.map((backup) => ({ path: backup.path, name: backup.name })),
+    ...(newBackupPath ? [{ path: newBackupPath, name: newBackupPath.split('/').pop() ?? newBackupPath }] : []),
+  ];
+  const keep = new Set(
+    nextBackups
+      .sort((a, b) => b.name.localeCompare(a.name))
+      .slice(0, MAX_SYNC_BACKUPS)
+      .map((backup) => backup.path),
+  );
+
+  return existingBackups.map((backup) => backup.path).filter((path) => !keep.has(path));
+};
+
 export const createSyncBundle = async (): Promise<SyncBundle> => {
   const [decks, cards, media] = await Promise.all([db.getDecks(), db.getCards(), db.getMedia()]);
 
@@ -203,16 +248,21 @@ export const createSyncBundle = async (): Promise<SyncBundle> => {
 
 export const pushSyncBundle = async (settings: SyncSettings): Promise<SyncResult> => {
   assertConfigured(settings);
-  const [bundle, remoteBundle] = await Promise.all([createSyncBundle(), getRemoteBundle(settings)]);
+  const [bundle, remoteBundle, existingBackups] = await Promise.all([
+    createSyncBundle(),
+    getRemoteBundle(settings),
+    getRemoteBackups(settings),
+  ]);
   const timestamp = new Date().toISOString();
   const files = [{ path: settings.path, content: JSON.stringify(bundle) }];
+  let backupPath: string | undefined;
 
   if (remoteBundle) {
-    const backupPath = `backups/${timestamp.replace(/[:.]/g, '-')}-${settings.path.split('/').pop() ?? 'memorizer-sync.json'}`;
+    backupPath = `backups/${timestamp.replace(/[:.]/g, '-')}-${settings.path.split('/').pop() ?? 'memorizer-sync.json'}`;
     files.push({ path: backupPath, content: JSON.stringify(remoteBundle) });
   }
 
-  await commitGitFiles(settings, files, `Update Memorizer sync ${timestamp}`);
+  await commitGitFiles(settings, files, backupCleanupPaths(existingBackups, backupPath), `Update Memorizer sync ${timestamp}`);
   return { decks: bundle.decks.length, cards: bundle.cards.length, media: bundle.media.length };
 };
 
