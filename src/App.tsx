@@ -801,9 +801,11 @@ const StudyView = ({
                     {swipeFeedback === 'remember' ? t('remember') : t('hard')}
                   </span>
                 )}
-                {imageUrl && <img className="mini-image" src={imageUrl} alt="" />}
-                <span className="rich-answer" dangerouslySetInnerHTML={{ __html: sanitizeRichText(current.answerText) }} />
-                {audioUrl && <audio controls src={audioUrl} onClick={(event) => event.stopPropagation()} />}
+                <span className="answer-scroll" onClick={(event) => event.stopPropagation()}>
+                  {imageUrl && <img className="mini-image" src={imageUrl} alt="" />}
+                  <span className="rich-answer" dangerouslySetInnerHTML={{ __html: sanitizeRichText(current.answerText) }} />
+                  {audioUrl && <audio controls src={audioUrl} onClick={(event) => event.stopPropagation()} />}
+                </span>
               </span>
             )}
           </button>
