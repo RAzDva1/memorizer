@@ -18,6 +18,7 @@ import {
   Sparkles,
   Trash2,
   Upload,
+  UploadCloud,
   Volume2,
   VolumeX,
   X,
@@ -40,7 +41,8 @@ import { applyImport, createBackup, downloadJson, parseImportFile } from './impo
 import { fileToAsset, optimizeImageAsset } from './media';
 import { hasRichTextContent, plainTextToRichText, sanitizeRichText, stripRichText } from './richText';
 import { createInitialSrs, isDue, reviewCard } from './srs';
-import { AppSettings, Card, Deck, DeckStats, ImportMode, ImportPreview, Locale } from './types';
+import { pullSyncBundle, pushSyncBundle } from './sync';
+import { AppSettings, Card, Deck, DeckStats, ImportMode, ImportPreview, Locale, SyncSettings } from './types';
 
 type Screen =
   | { name: 'training' }
@@ -825,6 +827,21 @@ const MoreView = ({
   refresh: () => void;
 }) => {
   const [message, setMessage] = useState('');
+  const [syncSettings, setSyncSettings] = useState<SyncSettings>({
+    token: '',
+    owner: 'RAzDva1',
+    repo: 'memorizer-sync',
+    branch: 'main',
+    path: 'memorizer-sync.json',
+  });
+
+  useEffect(() => {
+    db.getSyncSettings().then(setSyncSettings);
+  }, []);
+
+  const updateSyncSetting = (key: keyof SyncSettings, value: string) => {
+    setSyncSettings((current) => ({ ...current, [key]: value }));
+  };
 
   const exportBackup = async () => {
     const backup = await createBackup();
@@ -855,6 +872,41 @@ const MoreView = ({
     setMessage(`${t('optimizeDone')}: ${changed} / ${formatBytes(savedBytes)}`);
   };
 
+  const saveSyncSettings = async () => {
+    await db.saveSyncSettings(syncSettings);
+    setMessage(t('syncSaved'));
+  };
+
+  const clearToken = async () => {
+    const next = { ...syncSettings, token: '' };
+    setSyncSettings(next);
+    await db.saveSyncSettings(next);
+    setMessage(t('syncSaved'));
+  };
+
+  const pushSync = async () => {
+    try {
+      await db.saveSyncSettings(syncSettings);
+      setMessage(t('pushingSync'));
+      const result = await pushSyncBundle(syncSettings);
+      setMessage(`${t('syncDone')}: ${result.decks} ${t('decks')} · ${result.cards} ${t('cardsCount')}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Sync failed');
+    }
+  };
+
+  const pullSync = async () => {
+    try {
+      await db.saveSyncSettings(syncSettings);
+      setMessage(t('pullingSync'));
+      const result = await pullSyncBundle(syncSettings);
+      refresh();
+      setMessage(`${t('syncDone')}: ${result.decks} ${t('decks')} · ${result.cards} ${t('cardsCount')}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Sync failed');
+    }
+  };
+
   return (
     <section className="screen">
       <header className="topbar large">
@@ -877,8 +929,39 @@ const MoreView = ({
           <button className="secondary-button" onClick={optimizeMedia}><Image />{t('optimizeMedia')}</button>
           <button className="danger-button" onClick={clear}><Trash2 />{t('clearAll')}</button>
         </div>
-        {message && <p className="note">{message}</p>}
       </div>
+      <div className="settings-panel">
+        <h2>{t('sync')}</h2>
+        <div className="sync-grid">
+          <label>{t('githubOwner')}
+            <input value={syncSettings.owner} onChange={(event) => updateSyncSetting('owner', event.target.value.trim())} />
+          </label>
+          <label>{t('githubRepo')}
+            <input value={syncSettings.repo} onChange={(event) => updateSyncSetting('repo', event.target.value.trim())} />
+          </label>
+          <label>{t('githubBranch')}
+            <input value={syncSettings.branch} onChange={(event) => updateSyncSetting('branch', event.target.value.trim())} />
+          </label>
+          <label>{t('githubPath')}
+            <input value={syncSettings.path} onChange={(event) => updateSyncSetting('path', event.target.value.trim())} />
+          </label>
+        </div>
+        <label>{t('githubToken')}
+          <input
+            type="password"
+            value={syncSettings.token}
+            autoComplete="off"
+            onChange={(event) => updateSyncSetting('token', event.target.value.trim())}
+          />
+        </label>
+        <div className="button-cluster">
+          <button className="secondary-button" onClick={saveSyncSettings}><Save />{t('saveSyncSettings')}</button>
+          <button className="secondary-button" onClick={clearToken}><Trash2 />{t('clearToken')}</button>
+          <button className="primary-button" onClick={pushSync}><UploadCloud />{t('pushSync')}</button>
+          <button className="secondary-button" onClick={pullSync}><Download />{t('pullSync')}</button>
+        </div>
+      </div>
+      {message && <p className="status-note">{message}</p>}
     </section>
   );
 };

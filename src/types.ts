@@ -51,6 +51,14 @@ export type AppSettings = {
   locale: Locale;
 };
 
+export type SyncSettings = {
+  token: string;
+  owner: string;
+  repo: string;
+  branch: string;
+  path: string;
+};
+
 export type DeckStats = {
   total: number;
   due: number;
@@ -98,6 +106,16 @@ export type BackupBundle = {
   cards: Card[];
   media: Array<Omit<ImportMedia, 'url'> & { dataUrl: string; createdAt: string; mimeType: string }>;
   settings: AppSettings;
+};
+
+export type SyncCard = Omit<Card, 'srs'>;
+
+export type SyncBundle = {
+  version: 1;
+  exportedAt: string;
+  decks: Deck[];
+  cards: SyncCard[];
+  media: Array<Omit<ImportMedia, 'url'> & { dataUrl: string; createdAt: string; mimeType: string }>;
 };
 
 export type ImportMode = 'copy' | 'replace' | 'merge';

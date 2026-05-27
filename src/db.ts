@@ -1,8 +1,16 @@
-import { AppSettings, Card, Deck, MediaAsset } from './types';
+import { AppSettings, Card, Deck, MediaAsset, SyncSettings } from './types';
 import { detectLocale } from './i18n';
 
 const DB_NAME = 'memorizer-db';
 const DB_VERSION = 1;
+
+const DEFAULT_SYNC_SETTINGS: SyncSettings = {
+  token: '',
+  owner: 'RAzDva1',
+  repo: 'memorizer-sync',
+  branch: 'main',
+  path: 'memorizer-sync.json',
+};
 
 type StoreName = 'decks' | 'cards' | 'media' | 'settings';
 
@@ -106,6 +114,11 @@ export const db = {
     return existing ? { locale: existing.locale } : { locale: detectLocale() };
   },
   saveSettings: (settings: AppSettings) => put('settings', { id: 'app', ...settings }),
+  getSyncSettings: async (): Promise<SyncSettings> => {
+    const existing = await get<Partial<SyncSettings> & { id: string }>('settings', 'sync');
+    return { ...DEFAULT_SYNC_SETTINGS, ...existing };
+  },
+  saveSyncSettings: (settings: SyncSettings) => put('settings', { id: 'sync', ...settings }),
 
   replaceAll: async (decks: Deck[], cards: Card[], media: MediaAsset[], settings: AppSettings) => {
     const database = await openDatabase();
