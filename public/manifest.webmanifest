@@ -1,0 +1,17 @@
+{
+  "name": "Memorizer",
+  "short_name": "Memorizer",
+  "description": "Local-first flashcards with images, audio, and simple spaced repetition.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#fbefe5",
+  "theme_color": "#fbefe5",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
