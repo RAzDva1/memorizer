@@ -666,6 +666,7 @@ const StudyView = ({
   const [doneCount, setDoneCount] = useState(0);
   const [last, setLast] = useState<Card | undefined>();
   const [startPoint, setStartPoint] = useState<{ x: number; y: number } | undefined>();
+  const [drag, setDrag] = useState({ x: 0, y: 0 });
   const current = queue[0];
   const imageUrl = useMediaUrl(current?.questionImageId);
   const audioUrl = useMediaUrl(current?.answerAudioId);
@@ -677,6 +678,7 @@ const StudyView = ({
     setQueue((items) => items.slice(1));
     setDoneCount((count) => count + 1);
     setFlipped(false);
+    setDrag({ x: 0, y: 0 });
     refresh();
   };
 
@@ -685,6 +687,7 @@ const StudyView = ({
     setDoneCount(0);
     setFlipped(false);
     setLast(undefined);
+    setDrag({ x: 0, y: 0 });
   };
 
   const undo = async () => {
@@ -693,6 +696,7 @@ const StudyView = ({
     setQueue((items) => [last, ...items]);
     setDoneCount((count) => Math.max(0, count - 1));
     setLast(undefined);
+    setDrag({ x: 0, y: 0 });
     refresh();
   };
 
@@ -701,9 +705,18 @@ const StudyView = ({
     const deltaX = x - startPoint.x;
     const deltaY = y - startPoint.y;
     setStartPoint(undefined);
-    if (Math.abs(deltaX) < 55 || Math.abs(deltaX) < Math.abs(deltaY) * 1.25 || !flipped) return;
+    setDrag({ x: 0, y: 0 });
+    if (Math.abs(deltaX) < 55 || Math.abs(deltaX) < Math.abs(deltaY) * 1.15 || !flipped) return;
     navigator.vibrate?.(12);
     void answer(deltaX > 0);
+  };
+
+  const moveSwipe = (x: number, y: number) => {
+    if (!startPoint || !flipped) return;
+    setDrag({
+      x: Math.max(-140, Math.min(140, x - startPoint.x)),
+      y: Math.max(-28, Math.min(28, y - startPoint.y)),
+    });
   };
 
   const handlePointerUp = (event: PointerEvent) => {
@@ -737,12 +750,25 @@ const StudyView = ({
         <>
           <button
             className={flipped ? 'study-card flipped' : 'study-card'}
+            style={{
+              transform: flipped ? `translate3d(${drag.x}px, ${drag.y}px, 0) rotate(${drag.x / 18}deg)` : undefined,
+            }}
             onClick={() => setFlipped((value) => !value)}
             onPointerDown={(event) => setStartPoint({ x: event.clientX, y: event.clientY })}
+            onPointerMove={(event) => moveSwipe(event.clientX, event.clientY)}
             onPointerUp={handlePointerUp}
+            onPointerCancel={() => {
+              setStartPoint(undefined);
+              setDrag({ x: 0, y: 0 });
+            }}
             onTouchStart={(event) => {
               const touch = event.touches[0];
               if (touch) setStartPoint({ x: touch.clientX, y: touch.clientY });
+            }}
+            onTouchMove={(event) => {
+              const touch = event.touches[0];
+              if (!touch) return;
+              moveSwipe(touch.clientX, touch.clientY);
             }}
             onTouchEnd={handleTouchEnd}
           >
