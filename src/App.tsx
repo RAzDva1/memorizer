@@ -1151,7 +1151,7 @@ const MoreView = ({
             onChange={(event) => updateSyncSetting('token', event.target.value.trim())}
           />
         </label>
-        <div className="button-cluster">
+        <div className="button-cluster sync-actions">
           <button className="secondary-button" onClick={saveSyncSettings}><Save />{t('saveSyncSettings')}</button>
           <button className="secondary-button" onClick={clearToken}><Trash2 />{t('clearToken')}</button>
           <button className="primary-button" onClick={pushSync}><UploadCloud />{t('pushSync')}</button>
