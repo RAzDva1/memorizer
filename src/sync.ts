@@ -92,6 +92,7 @@ const readGitHubError = async (response: Response, label: string) => {
 
 const getBranchHead = async (settings: SyncSettings): Promise<GitHubCommit> => {
   const refResponse = await fetch(gitApiUrl(settings, `ref/heads/${encodeURIComponent(settings.branch)}`), {
+    cache: 'no-store',
     headers: githubHeaders(settings),
   });
 
@@ -99,6 +100,7 @@ const getBranchHead = async (settings: SyncSettings): Promise<GitHubCommit> => {
   const ref = (await refResponse.json()) as GitHubRef;
 
   const commitResponse = await fetch(gitApiUrl(settings, `commits/${ref.object.sha}`), {
+    cache: 'no-store',
     headers: githubHeaders(settings),
   });
 
@@ -191,6 +193,7 @@ const commitGitFiles = async (
 
 const getRemoteBundle = async (settings: SyncSettings): Promise<SyncBundle | undefined> => {
   const response = await fetch(`${apiUrl(settings)}?ref=${encodeURIComponent(settings.branch)}`, {
+    cache: 'no-store',
     headers: githubHeaders(settings, 'application/vnd.github.raw+json'),
   });
 
@@ -201,6 +204,7 @@ const getRemoteBundle = async (settings: SyncSettings): Promise<SyncBundle | und
 
 const getRemoteBackups = async (settings: SyncSettings): Promise<GitHubContentItem[]> => {
   const response = await fetch(`${apiUrlForPath(settings, 'backups')}?ref=${encodeURIComponent(settings.branch)}`, {
+    cache: 'no-store',
     headers: githubHeaders(settings),
   });
 

@@ -73,13 +73,25 @@ const get = async <T>(storeName: StoreName, id: string): Promise<T | undefined> 
 };
 
 const put = async <T>(storeName: StoreName, value: T): Promise<void> => {
-  const store = await tx(storeName, 'readwrite');
-  await requestToPromise(store.put(value));
+  const database = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(storeName, 'readwrite');
+    transaction.objectStore(storeName).put(value);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
 };
 
 const remove = async (storeName: StoreName, id: string): Promise<void> => {
-  const store = await tx(storeName, 'readwrite');
-  await requestToPromise(store.delete(id));
+  const database = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(storeName, 'readwrite');
+    transaction.objectStore(storeName).delete(id);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
 };
 
 export const uid = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;

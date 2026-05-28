@@ -375,6 +375,8 @@ const DeckDetail = ({
   refresh: () => void;
 }) => {
   const due = cards.filter((card) => isDue(card.srs)).length;
+  const coverUrl = useMediaUrl(deck.coverImageId);
+  const [isCoverOpen, setIsCoverOpen] = useState(false);
 
   const resetProgress = async () => {
     if (!confirm(t('resetProgressConfirm'))) return;
@@ -391,7 +393,13 @@ const DeckDetail = ({
         <button className="icon-button" onClick={() => go({ name: 'deckForm', deckId: deck.id })} aria-label={t('editDeck')}><Pencil /></button>
       </header>
       <div className="deck-hero">
-        <DeckThumb deck={deck} />
+        {coverUrl ? (
+          <button className="deck-hero-cover" type="button" onClick={() => setIsCoverOpen(true)} aria-label={t('viewCover')}>
+            <img src={coverUrl} alt="" />
+          </button>
+        ) : (
+          <DeckThumb deck={deck} />
+        )}
         <div>
           <p>{deck.description}</p>
           <small>{due} {t('due')} · {cards.length} {t('cardsCount')}</small>
@@ -442,6 +450,14 @@ const DeckDetail = ({
         ))}
         {cards.length === 0 && <EmptyState label={t('noCards')} icon={Library} />}
       </div>
+      {isCoverOpen && coverUrl && (
+        <div className="image-viewer" role="dialog" aria-modal="true" onClick={() => setIsCoverOpen(false)}>
+          <button className="round ghost image-viewer-close" type="button" onClick={() => setIsCoverOpen(false)} aria-label={t('closePreview')}>
+            <X />
+          </button>
+          <img src={coverUrl} alt="" onClick={(event) => event.stopPropagation()} />
+        </div>
+      )}
     </section>
   );
 };
