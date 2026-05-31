@@ -61,6 +61,21 @@ const byCreatedAt = <T extends { createdAt: string }>(a: T, b: T) => a.createdAt
 
 const formatTags = (tags: string[]) => tags.join(', ');
 
+const byCardOrder = (a: Card, b: Card) =>
+  (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) || byCreatedAt(a, b);
+
+const byLastOpened = (a: Deck, b: Deck) =>
+  (b.lastOpenedAt ?? b.updatedAt ?? b.createdAt).localeCompare(a.lastOpenedAt ?? a.updatedAt ?? a.createdAt) || byCreatedAt(a, b);
+
+const shuffle = <T,>(items: T[]) => {
+  const result = [...items];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
+  }
+  return result;
+};
+
 type SwipeInput = 'pointer' | 'touch';
 type SwipeMode = 'idle' | 'pending' | 'swipe' | 'scroll';
 
@@ -139,15 +154,33 @@ export const App = () => {
     refresh();
   };
 
+  const markDeckOpened = async (deckId: string) => {
+    const deck = await db.getDeck(deckId);
+    if (!deck) return;
+    const timestamp = nowIso();
+    await db.saveDeck({ ...deck, lastOpenedAt: timestamp, updatedAt: timestamp });
+    refresh();
+  };
+
+  const goToDeck = (deckId: string) => {
+    void markDeckOpened(deckId);
+    setScreen({ name: 'deck', deckId });
+  };
+
+  const startStudy = (deckId: string, mode: 'due' | 'all' = 'due') => {
+    void markDeckOpened(deckId);
+    setScreen({ name: 'study', deckId, mode });
+  };
+
   const currentDeck = 'deckId' in screen ? decks.find((deck) => deck.id === screen.deckId) : undefined;
 
   return (
     <div className="app-shell">
       <main className="app-main">
         {screen.name === 'training' && (
-          <TrainingHome decks={decks} stats={stats} t={t} go={setScreen} />
+          <TrainingHome decks={[...decks].sort(byLastOpened)} stats={stats} t={t} startStudy={startStudy} />
         )}
-        {screen.name === 'decks' && <DecksView decks={decks} stats={stats} t={t} go={setScreen} />}
+        {screen.name === 'decks' && <DecksView decks={decks} stats={stats} t={t} go={setScreen} goToDeck={goToDeck} startStudy={startStudy} />}
         {screen.name === 'library' && <LibraryView t={t} refresh={refresh} />}
         {screen.name === 'more' && (
           <MoreView t={t} settings={settings} updateSettings={updateSettings} refresh={refresh} />
@@ -155,9 +188,10 @@ export const App = () => {
         {screen.name === 'deck' && currentDeck && (
           <DeckDetail
             deck={currentDeck}
-            cards={cards.filter((card) => card.deckId === currentDeck.id).sort(byCreatedAt)}
+            cards={cards.filter((card) => card.deckId === currentDeck.id).sort(byCardOrder)}
             t={t}
             go={setScreen}
+            startStudy={startStudy}
             refresh={refresh}
           />
         )}
@@ -183,7 +217,7 @@ export const App = () => {
           <StudyView
             key={`${currentDeck.id}-${screen.mode ?? 'due'}`}
             deck={currentDeck}
-            cards={cards.filter((card) => card.deckId === currentDeck.id).sort(byCreatedAt)}
+            cards={cards.filter((card) => card.deckId === currentDeck.id).sort(byCardOrder)}
             mode={screen.mode ?? 'due'}
             t={t}
             back={() => setScreen({ name: 'deck', deckId: currentDeck.id })}
@@ -238,11 +272,15 @@ const DecksView = ({
   stats,
   t,
   go,
+  goToDeck,
+  startStudy,
 }: {
   decks: Deck[];
   stats: Map<string, DeckStats>;
   t: (key: TranslationKey) => string;
   go: (screen: Screen) => void;
+  goToDeck: (deckId: string) => void;
+  startStudy: (deckId: string, mode?: 'due' | 'all') => void;
 }) => (
   <section className="screen">
     <header className="topbar large">
@@ -256,7 +294,7 @@ const DecksView = ({
     ) : (
       <div className="deck-grid">
         {decks.map((deck) => (
-          <DeckTile key={deck.id} deck={deck} stats={stats.get(deck.id)} t={t} go={go} />
+          <DeckTile key={deck.id} deck={deck} stats={stats.get(deck.id)} t={t} go={go} goToDeck={goToDeck} startStudy={startStudy} />
         ))}
       </div>
     )}
@@ -268,16 +306,20 @@ const DeckTile = ({
   stats,
   t,
   go,
+  goToDeck,
+  startStudy,
 }: {
   deck: Deck;
   stats?: DeckStats;
   t: (key: TranslationKey) => string;
   go: (screen: Screen) => void;
+  goToDeck: (deckId: string) => void;
+  startStudy: (deckId: string, mode?: 'due' | 'all') => void;
 }) => {
   const coverUrl = useMediaUrl(deck.coverImageId);
 
   return (
-    <article className="deck-tile" onClick={() => go({ name: 'deck', deckId: deck.id })}>
+    <article className="deck-tile" onClick={() => goToDeck(deck.id)}>
       <div className="deck-cover">
         {coverUrl ? <img src={coverUrl} alt="" /> : <div className="cover-placeholder"><Library /></div>}
         <button
@@ -294,7 +336,7 @@ const DeckTile = ({
           className="round play-button"
           onClick={(event) => {
             event.stopPropagation();
-            go({ name: 'study', deckId: deck.id, mode: 'due' });
+            startStudy(deck.id);
           }}
           aria-label={t('start')}
         >
@@ -314,12 +356,12 @@ const TrainingHome = ({
   decks,
   stats,
   t,
-  go,
+  startStudy,
 }: {
   decks: Deck[];
   stats: Map<string, DeckStats>;
   t: (key: TranslationKey) => string;
-  go: (screen: Screen) => void;
+  startStudy: (deckId: string, mode?: 'due' | 'all') => void;
 }) => (
   <section className="screen">
     <header className="topbar large">
@@ -330,7 +372,7 @@ const TrainingHome = ({
       {decks.map((deck) => {
         const item = stats.get(deck.id) ?? { total: 0, due: 0, learned: 0 };
         return (
-          <button key={deck.id} className="training-row" onClick={() => go({ name: 'study', deckId: deck.id, mode: 'due' })}>
+          <button key={deck.id} className="training-row" onClick={() => startStudy(deck.id)}>
             <DeckThumb deck={deck} />
             <span>
               <strong>{deck.title}</strong>
@@ -366,12 +408,14 @@ const DeckDetail = ({
   cards,
   t,
   go,
+  startStudy,
   refresh,
 }: {
   deck: Deck;
   cards: Card[];
   t: (key: TranslationKey) => string;
   go: (screen: Screen) => void;
+  startStudy: (deckId: string, mode?: 'due' | 'all') => void;
   refresh: () => void;
 }) => {
   const due = cards.filter((card) => isDue(card.srs)).length;
@@ -382,6 +426,12 @@ const DeckDetail = ({
     if (!confirm(t('resetProgressConfirm'))) return;
     const timestamp = nowIso();
     await Promise.all(cards.map((card) => db.saveCard({ ...card, srs: createInitialSrs(), updatedAt: timestamp })));
+    refresh();
+  };
+
+  const shuffleCards = async () => {
+    const timestamp = nowIso();
+    await Promise.all(shuffle(cards).map((card, index) => db.saveCard({ ...card, order: index + 1, updatedAt: timestamp })));
     refresh();
   };
 
@@ -406,11 +456,12 @@ const DeckDetail = ({
         </div>
       </div>
       <div className="action-row">
-        <button className="primary-button" onClick={() => go({ name: 'study', deckId: deck.id, mode: 'due' })}><Play />{t('start')}</button>
-        <button className="secondary-button" onClick={() => go({ name: 'study', deckId: deck.id, mode: 'all' })}><ListRestart />{t('allCards')}</button>
+        <button className="primary-button" onClick={() => startStudy(deck.id)}><Play />{t('start')}</button>
+        <button className="secondary-button" onClick={() => startStudy(deck.id, 'all')}><ListRestart />{t('allCards')}</button>
       </div>
       <div className="action-row">
         <button className="secondary-button" onClick={() => go({ name: 'cardForm', deckId: deck.id })}><Plus />{t('newCard')}</button>
+        <button className="secondary-button" onClick={shuffleCards}><Sparkles />{t('shuffleCards')}</button>
       </div>
       <section className="settings-panel">
         <h2>{t('settings')}</h2>
@@ -685,7 +736,6 @@ const StudyView = ({
   const [drag, setDrag] = useState({ x: 0, y: 0 });
   const [swipeFeedback, setSwipeFeedback] = useState<'remember' | 'hard' | undefined>();
   const startPointRef = useRef<{ x: number; y: number } | undefined>();
-  const flippedRef = useRef(false);
   const currentRef = useRef<Card | undefined>();
   const didDragRef = useRef(false);
   const swipeModeRef = useRef<SwipeMode>('idle');
@@ -695,7 +745,6 @@ const StudyView = ({
   const imageUrl = useMediaUrl(current?.questionImageId);
   const audioUrl = useMediaUrl(current?.answerAudioId);
 
-  flippedRef.current = flipped;
   currentRef.current = current;
 
   const answer = async (remembered: boolean, animate = false) => {
@@ -768,7 +817,7 @@ const StudyView = ({
     swipeInputRef.current = undefined;
     lastSwipePointRef.current = undefined;
     setDrag({ x: 0, y: 0 });
-    if (!wasSwipe || Math.abs(deltaX) < 48 || !flippedRef.current) {
+    if (!wasSwipe || Math.abs(deltaX) < 48) {
       setSwipeFeedback(undefined);
       return;
     }
@@ -779,7 +828,7 @@ const StudyView = ({
   const moveSwipe = (input: SwipeInput, x: number, y: number, stopNativeScroll?: () => void) => {
     const origin = startPointRef.current;
     if (swipeInputRef.current && swipeInputRef.current !== input) return;
-    if (!origin || !flippedRef.current) return;
+    if (!origin || !currentRef.current) return;
     const deltaX = x - origin.x;
     const deltaY = y - origin.y;
     const absX = Math.abs(deltaX);
@@ -888,7 +937,7 @@ const StudyView = ({
               swipeFeedback ? `swipe-${swipeFeedback}` : '',
             ].join(' ')}
             style={{
-              transform: flipped ? `translate3d(${drag.x}px, ${drag.y}px, 0) rotate(${drag.x / 18}deg)` : undefined,
+              transform: drag.x || drag.y ? `translate3d(${drag.x}px, ${drag.y}px, 0) rotate(${drag.x / 18}deg)` : undefined,
             }}
             onClick={() => {
               if (didDragRef.current) {
@@ -910,6 +959,12 @@ const StudyView = ({
               if (touch) beginSwipe('touch', touch.clientX, touch.clientY);
             }}
           >
+            {swipeFeedback && (
+              <span className="swipe-badge">
+                {swipeFeedback === 'remember' ? <Check size={20} /> : <X size={20} />}
+                {swipeFeedback === 'remember' ? t('remember') : t('hard')}
+              </span>
+            )}
             {!flipped ? (
               <span className="study-front">
                 {deck.settings.showQuestionImage && imageUrl && <img src={imageUrl} alt="" />}
@@ -917,12 +972,6 @@ const StudyView = ({
               </span>
             ) : (
               <span className="study-back">
-                {swipeFeedback && (
-                  <span className="swipe-badge">
-                    {swipeFeedback === 'remember' ? <Check size={20} /> : <X size={20} />}
-                    {swipeFeedback === 'remember' ? t('remember') : t('hard')}
-                  </span>
-                )}
                 <span className="answer-scroll">
                   {imageUrl && <img className="mini-image" src={imageUrl} alt="" />}
                   <span className="rich-answer" dangerouslySetInnerHTML={{ __html: sanitizeRichText(current.answerText) }} />

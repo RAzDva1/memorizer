@@ -23,6 +23,7 @@ export type Deck = {
   locale: Locale;
   tags: string[];
   settings: DeckSettings;
+  lastOpenedAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -34,6 +35,7 @@ export type Card = {
   questionImageId?: string;
   answerText: string;
   answerAudioId?: string;
+  order?: number;
   srs: SrsState;
   createdAt: string;
   updatedAt: string;

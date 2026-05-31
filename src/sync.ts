@@ -300,6 +300,7 @@ const mergeDecks = (incoming: Deck[], existing: Deck[]) => {
       ...deck,
       id: targetId,
       createdAt: matched?.createdAt ?? deck.createdAt,
+      lastOpenedAt: matched?.lastOpenedAt ?? deck.lastOpenedAt,
       updatedAt: deck.updatedAt,
     };
   });

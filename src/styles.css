@@ -666,6 +666,7 @@ audio {
 }
 
 .study-card {
+  position: relative;
   display: flex;
   overflow: hidden;
   width: 100%;
